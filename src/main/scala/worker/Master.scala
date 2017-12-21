@@ -1,6 +1,6 @@
 package worker
 
-import akka.actor.{ActorLogging, ActorRef, Cancellable, Props, Timers}
+import akka.actor.{Actor, ActorLogging, ActorRef, Cancellable, Props, Timers}
 import akka.cluster.pubsub.{DistributedPubSub, DistributedPubSubMediator}
 import akka.persistence.{PersistentActor, RecoveryCompleted, SnapshotOffer}
 
@@ -27,12 +27,10 @@ object Master {
 
 }
 
-class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers with ActorLogging {
+class Master(workTimeout: FiniteDuration) extends Actor with Timers with ActorLogging {
   import Master._
   import WorkState._
   import context.dispatcher
-
-  override val persistenceId: String = "master"
 
   val considerWorkerDeadAfter: FiniteDuration =
     context.system.settings.config.getDuration("distributed-workers.consider-worker-dead-after").getSeconds.seconds
@@ -48,26 +46,7 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
   // workState is event sourced to be able to make sure work is processed even in case of crash
   private var workState = WorkState.empty
 
-
-  override def receiveRecover: Receive = {
-
-    case SnapshotOffer(_, workStateSnapshot: WorkState) =>
-      // If we would have  logic triggering snapshots in the actor
-      // we would start from the latest snapshot here when recovering
-      log.info("Got snapshot work state")
-      workState = workStateSnapshot
-
-    case event: WorkDomainEvent =>
-      // only update current state by applying the event, no side effects
-      workState = workState.updated(event)
-      log.info("Replayed {}", event.getClass.getSimpleName)
-
-    case RecoveryCompleted =>
-      log.info("Recovery completed")
-
-  }
-
-  override def receiveCommand: Receive = {
+  override def receive: Receive = {
     case MasterWorkerProtocol.RegisterWorker(workerId) =>
       if (workers.contains(workerId)) {
         workers += (workerId -> workers(workerId).copy(ref = sender(), staleWorkerDeadline = newStaleWorkerDeadline()))
@@ -89,10 +68,8 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
         case Some(WorkerState(_, Busy(workId, _), _)) =>
           // there was a workload assigned to the worker when it left
           log.info("Busy worker de-registered: {}", workerId)
-          persist(WorkerFailed(workId)) { event ⇒
-            workState = workState.updated(event)
-            notifyWorkers()
-          }
+          workState = workState.updated(WorkerFailed(workId))
+          notifyWorkers()
         case Some(_) =>
           log.info("Worker de-registered: {}", workerId)
         case _ =>
@@ -105,15 +82,13 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
         workers.get(workerId) match {
           case Some(workerState @ WorkerState(_, Idle, _)) =>
             val work = workState.nextWork
-            persist(WorkStarted(work.workId)) { event =>
-              workState = workState.updated(event)
-              log.info("Giving worker {} some work {}", workerId, work.workId)
-              val newWorkerState = workerState.copy(
-                status = Busy(work.workId, Deadline.now + workTimeout),
-                staleWorkerDeadline = newStaleWorkerDeadline())
-              workers += (workerId -> newWorkerState)
-              sender() ! work
-            }
+            workState = workState.updated(WorkStarted(work.workId))
+            log.info("Giving worker {} some work {}", workerId, work.workId)
+            val newWorkerState = workerState.copy(
+              status = Busy(work.workId, Deadline.now + workTimeout),
+              staleWorkerDeadline = newStaleWorkerDeadline())
+            workers += (workerId -> newWorkerState)
+            sender() ! work
           case _ =>
         }
       }
@@ -128,22 +103,18 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
       } else {
         log.info("Work {} is done by worker {}", workId, workerId)
         changeWorkerToIdle(workerId, workId)
-        persist(WorkCompleted(workId, result)) { event ⇒
-          workState = workState.updated(event)
-          mediator ! DistributedPubSubMediator.Publish(ResultsTopic, WorkResult(workId, result))
-          // Ack back to original sender
-          sender ! MasterWorkerProtocol.Ack(workId)
-        }
+        workState = workState.updated(WorkCompleted(workId, result))
+        mediator ! DistributedPubSubMediator.Publish(ResultsTopic, WorkResult(workId, result))
+        // Ack back to original sender
+        sender ! MasterWorkerProtocol.Ack(workId)
       }
 
     case MasterWorkerProtocol.WorkFailed(workerId, workId) =>
       if (workState.isInProgress(workId)) {
         log.info("Work {} failed by worker {}", workId, workerId)
         changeWorkerToIdle(workerId, workId)
-        persist(WorkerFailed(workId)) { event ⇒
-          workState = workState.updated(event)
-          notifyWorkers()
-        }
+        workState = workState.updated(WorkerFailed(workId))
+        notifyWorkers()
       }
 
     // #persisting
@@ -153,12 +124,10 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
         sender() ! Master.Ack(work.workId)
       } else {
         log.info("Accepted work: {}", work.workId)
-        persist(WorkAccepted(work)) { event ⇒
-          // Ack back to original sender
-          sender() ! Master.Ack(work.workId)
-          workState = workState.updated(event)
-          notifyWorkers()
-        }
+        // Ack back to original sender
+        sender() ! Master.Ack(work.workId)
+        workState = workState.updated(WorkAccepted(work))
+        notifyWorkers()
       }
     // #persisting
 
@@ -168,11 +137,8 @@ class Master(workTimeout: FiniteDuration) extends PersistentActor with Timers wi
         case (workerId, WorkerState(_, Busy(workId, timeout), _)) if timeout.isOverdue() =>
           log.info("Work timed out: {}", workId)
           workers -= workerId
-          persist(WorkerTimedOut(workId)) { event ⇒
-            workState = workState.updated(event)
-            notifyWorkers()
-          }
-
+          workState = workState.updated(WorkerTimedOut(workId))
+          notifyWorkers()
 
         case (workerId, WorkerState(_, Idle, lastHeardFrom)) if lastHeardFrom.isOverdue() =>
           log.info("Too long since heard from worker {}, pruning", workerId)

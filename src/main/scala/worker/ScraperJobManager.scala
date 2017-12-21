@@ -10,29 +10,33 @@ import akka.util.Timeout
 import scala.concurrent.duration._
 
 /**
- * Dummy front-end that periodically sends a workload to the master.
+ * Dummy scraper-job-manager that periodically sends a workload to the master.
  */
-object FrontEnd {
+object ScraperJobManager {
 
-  def props: Props = Props(new FrontEnd)
+  def props: Props = Props(new ScraperJobManager)
 
   private case object NotOk
   private case object Tick
   private case object Retry
 }
 
-// #front-end
-class FrontEnd extends Actor with ActorLogging with Timers {
-  import FrontEnd._
+// #scraper-job-manager
+class ScraperJobManager extends Actor with ActorLogging with Timers {
+  import ScraperJobManager._
   import context.dispatcher
 
   val masterProxy = context.actorOf(
     MasterSingleton.proxyProps(context.system),
     name = "masterProxy")
 
-  var workCounter = 0
+  var userCounter = 0
 
   def nextWorkId(): String = UUID.randomUUID().toString
+
+  val pages = Array("http://www.linkedin.com/", "http://www.xing.de/", "http://www.facebook.com/")
+
+  val random = new scala.util.Random
 
   override def preStart(): Unit = {
     timers.startSingleTimer("tick", Tick, 5.seconds)
@@ -42,9 +46,10 @@ class FrontEnd extends Actor with ActorLogging with Timers {
 
   def idle: Receive = {
     case Tick =>
-      workCounter += 1
-      log.info("Produced work: {}", workCounter)
-      val work = Work(nextWorkId(), workCounter)
+      userCounter += 1
+      val nextUrl = pages(random.nextInt(3)) + userCounter
+      log.info("Produced work: {}", nextUrl)
+      val work = Work(nextWorkId(), nextUrl)
       context.become(busy(work))
   }
 
@@ -76,4 +81,4 @@ class FrontEnd extends Actor with ActorLogging with Timers {
   }
 
 }
-// #front-end
+// #scraper-job-manager

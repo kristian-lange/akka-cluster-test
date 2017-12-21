@@ -42,7 +42,7 @@ object DistributedWorkerSpec {
     }
 
     def receive = {
-      case WorkExecutor.DoWork(n: Int) =>
+      case ProfileScraper.DoWork(n: Int) =>
         i += 1
         if (i == 3) {
           log.info("Cannot be trusted, crashing")
@@ -54,21 +54,21 @@ object DistributedWorkerSpec {
           val n2 = n * n
           val result = s"$n * $n = $n2"
           log.info("Cannot be trusted, but did complete work: {}", result)
-          sender() ! WorkExecutor.WorkComplete(result)
+          sender() ! ProfileScraper.WorkComplete(result)
         }
     }
   }
 
   class FastWorkExecutor extends Actor with ActorLogging {
     def receive = {
-      case WorkExecutor.DoWork(n: Int) =>
+      case ProfileScraper.DoWork(n: Int) =>
         val n2 = n * n
         val result = s"$n * $n = $n2"
-        sender() ! WorkExecutor.WorkComplete(result)
+        sender() ! ProfileScraper.WorkComplete(result)
     }
   }
 
-  class RemoteControllableFrontend extends FrontEnd {
+  class RemoteControllableFrontend extends ScraperJobManager {
 
     var currentWorkIdAndSender: Option[(String, ActorRef)] = None
 
@@ -105,7 +105,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
   def this() = this(ActorSystem("DistributedWorkerSpec", DistributedWorkerSpec.clusterConfig))
 
   val backendSystem: ActorSystem = {
-    val config = ConfigFactory.parseString("akka.cluster.roles=[back-end]").withFallback(clusterConfig)
+    val config = ConfigFactory.parseString("akka.cluster.roles=[master]").withFallback(clusterConfig)
     ActorSystem("DistributedWorkerSpec", config)
   }
 
@@ -132,7 +132,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
       ClusterSingletonManager.props(
         Master.props(workTimeout),
         PoisonPill,
-        ClusterSingletonManagerSettings(system).withRole("back-end")),
+        ClusterSingletonManagerSettings(system).withRole("master")),
       "master")
 
     Cluster(workerSystem).join(clusterAddress)
@@ -141,14 +141,14 @@ class DistributedWorkerSpec(_system: ActorSystem)
       MasterSingleton.proxyProps(workerSystem),
       name = "masterProxy")
     val fastWorkerProps = Props(new Worker(masterProxy) {
-      override def createWorkExecutor(): ActorRef = context.actorOf(Props(new FastWorkExecutor), "fast-executor")
+      override def createScraper(): ActorRef = context.actorOf(Props(new FastWorkExecutor), "fast-executor")
     })
 
     for (n <- 1 to 3)
       workerSystem.actorOf(fastWorkerProps, "worker-" + n)
 
     val flakyWorkerProps = Props(new Worker(masterProxy) {
-      override def createWorkExecutor(): ActorRef = {
+      override def createScraper(): ActorRef = {
         context.actorOf(Props(new FlakyWorkExecutor), "flaky-executor")
       }
     })
@@ -159,13 +159,13 @@ class DistributedWorkerSpec(_system: ActorSystem)
 
     // allow posting work from the outside
 
-    val frontend = system.actorOf(Props[RemoteControllableFrontend], "front-end")
+    val frontend = system.actorOf(Props[RemoteControllableFrontend], "scraper-job-manager")
 
     val results = TestProbe()
     DistributedPubSub(system).mediator ! Subscribe(Master.ResultsTopic, results.ref)
     expectMsgType[SubscribeAck]
 
-    // make sure pub sub topics are replicated over to the back-end system before triggering any work
+    // make sure pub sub topics are replicated over to the master system before triggering any work
     within(10.seconds) {
       awaitAssert {
         DistributedPubSub(backendSystem).mediator ! GetTopics

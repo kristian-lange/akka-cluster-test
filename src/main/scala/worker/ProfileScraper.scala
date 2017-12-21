@@ -9,21 +9,20 @@ import scala.concurrent.duration._
 /**
  * Work executor is the actor actually performing the work.
  */
-object WorkExecutor {
-  def props = Props(new WorkExecutor)
+object ProfileScraper {
+  def props = Props(new ProfileScraper)
 
-  case class DoWork(n: Int)
+  case class DoWork(n: String)
   case class WorkComplete(result: String)
 }
 
-class WorkExecutor extends Actor {
-  import WorkExecutor._
+class ProfileScraper extends Actor {
+  import ProfileScraper._
   import context.dispatcher
 
   def receive = {
-    case DoWork(n: Int) =>
-      val n2 = n * n
-      val result = s"$n * $n = $n2"
+    case DoWork(url: String) =>
+      val result = s"profile of $url"
 
       // simulate that the processing time varies
       val randomProcessingTime = ThreadLocalRandom.current.nextInt(1, 3).seconds

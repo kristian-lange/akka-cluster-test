@@ -28,7 +28,7 @@ class Worker(masterProxy: ActorRef)
 
   val registerTask = context.system.scheduler.schedule(0.seconds, registerInterval, masterProxy, RegisterWorker(workerId))
 
-  val workExecutor = createWorkExecutor()
+  val workExecutor = createScraper()
 
   var currentWorkId: Option[String] = None
   def workId: String = currentWorkId match {
@@ -43,16 +43,16 @@ class Worker(masterProxy: ActorRef)
       // this is the only state where we reply to WorkIsReady
       masterProxy ! WorkerRequestsWork(workerId)
 
-    case Work(workId, job: Int) =>
+    case Work(workId, job: String) =>
       log.info("Got work: {}", job)
       currentWorkId = Some(workId)
-      workExecutor ! WorkExecutor.DoWork(job)
+      workExecutor ! ProfileScraper.DoWork(job)
       context.become(working)
 
   }
 
   def working: Receive = {
-    case WorkExecutor.WorkComplete(result) =>
+    case ProfileScraper.WorkComplete(result) =>
       log.info("Work is complete. Result {}.", result)
       masterProxy ! WorkIsDone(workerId, workId, result)
       context.setReceiveTimeout(5.seconds)
@@ -75,10 +75,10 @@ class Worker(masterProxy: ActorRef)
 
   }
 
-  def createWorkExecutor(): ActorRef =
+  def createScraper(): ActorRef =
     // in addition to starting the actor we also watch it, so that
     // if it stops this worker will also be stopped
-    context.watch(context.actorOf(WorkExecutor.props, "work-executor"))
+    context.watch(context.actorOf(ProfileScraper.props, "scraper"))
 
   override def supervisorStrategy = OneForOneStrategy() {
     case _: ActorInitializationException => Stop
