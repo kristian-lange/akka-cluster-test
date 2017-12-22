@@ -36,13 +36,13 @@ class Worker(masterProxy: ActorRef)
     case None         => throw new IllegalStateException("Not working")
   }
 
+  override def preStart(): Unit = {
+    masterProxy ! WorkerRequestsWork(workerId)
+  }
+
   def receive = idle
 
   def idle: Receive = {
-    case WorkIsReady =>
-      // this is the only state where we reply to WorkIsReady
-      masterProxy ! WorkerRequestsWork(workerId)
-
     case Work(workId, job: String) =>
       log.info("Got work: {}", job)
       currentWorkId = Some(workId)

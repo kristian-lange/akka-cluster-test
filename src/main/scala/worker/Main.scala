@@ -3,6 +3,9 @@ package worker
 import akka.actor.ActorSystem
 import com.typesafe.config.{Config, ConfigFactory}
 
+/**
+  * From template https://developer.lightbend.com/guides/akka-distributed-workers-scala
+  */
 object Main {
 
   // note that 2551 and 2552 are expected to be seed nodes though, even if
@@ -49,8 +52,7 @@ object Main {
     * Start a ScraperJobManger node that will submit work to the master nodes
     */
   def startScraperJobManager(port: Int): Unit = {
-    val system = ActorSystem("ClusterSystem", config(port, "scraper-job-manager"))
-    system.actorOf(ScraperJobManager.props, "scraper-job-manager")
+    val system = ActorSystem("ClusterSystem", config(port, "profile-pipeline"))
     system.actorOf(ProfilePipeline.props, "profile-pipeline")
   }
 

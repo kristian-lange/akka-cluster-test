@@ -9,6 +9,5 @@ object MasterWorkerProtocol {
   case class WorkFailed(workerId: String, workId: String)
 
   // Messages to Workers
-  case object WorkIsReady
   case class Ack(id: String)
 }
