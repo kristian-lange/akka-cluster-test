@@ -42,7 +42,7 @@ object DistributedWorkerSpec {
     }
 
     def receive = {
-      case ProfileScraper.DoWork(n: Int) =>
+      case Scraper.Scrape(n: Int) =>
         i += 1
         if (i == 3) {
           log.info("Cannot be trusted, crashing")
@@ -54,21 +54,21 @@ object DistributedWorkerSpec {
           val n2 = n * n
           val result = s"$n * $n = $n2"
           log.info("Cannot be trusted, but did complete work: {}", result)
-          sender() ! ProfileScraper.WorkComplete(result)
+          sender() ! Scraper.Complete(result)
         }
     }
   }
 
   class FastWorkExecutor extends Actor with ActorLogging {
     def receive = {
-      case ProfileScraper.DoWork(n: Int) =>
+      case Scraper.Scrape(n: Int) =>
         val n2 = n * n
         val result = s"$n * $n = $n2"
-        sender() ! ProfileScraper.WorkComplete(result)
+        sender() ! Scraper.Complete(result)
     }
   }
 
-  class RemoteControllableFrontend extends ScraperJobManager {
+  class RemoteControllableFrontend extends WorkManager {
 
     var currentWorkIdAndSender: Option[(String, ActorRef)] = None
 

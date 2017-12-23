@@ -2,43 +2,53 @@ package worker
 
 import scala.collection.immutable.Queue
 
+
 object WorkState {
 
   def empty: WorkState = WorkState(
     pendingWork = Queue.empty,
     workInProgress = Map.empty,
-    acceptedWorkIds = Set.empty,
+    acceptedBulkWorkIds = Set.empty,
     doneWorkIds = Set.empty)
 
   trait WorkDomainEvent
-  // #events
-  case class WorkAccepted(work: Work) extends WorkDomainEvent
+
+  case class WorkAccepted(bulkWork: BulkWork) extends WorkDomainEvent
+
   case class WorkStarted(workId: String) extends WorkDomainEvent
+
   case class WorkCompleted(workId: String, result: Any) extends WorkDomainEvent
+
   case class WorkerFailed(workId: String) extends WorkDomainEvent
+
   case class WorkerTimedOut(workId: String) extends WorkDomainEvent
-  // #events
+
 }
 
-case class WorkState private (
-  private val pendingWork: Queue[Work],
-  private val workInProgress: Map[String, Work],
-  private val acceptedWorkIds: Set[String],
-  private val doneWorkIds: Set[String]) {
+case class WorkState private(private val pendingWork: Queue[Work],
+                             private val workInProgress: Map[String, Work],
+                             private val acceptedBulkWorkIds: Set[String],
+                             private val doneWorkIds: Set[String]) {
 
   import WorkState._
 
   def hasWork: Boolean = pendingWork.nonEmpty
+
+  def isLowInWork: Boolean = pendingWork.size < WorkManager.bulkWorkSize / 10
+
   def nextWork: Work = pendingWork.head
-  def isAccepted(workId: String): Boolean = acceptedWorkIds.contains(workId)
+
+  def isAccepted(bulkWorkId: String): Boolean = acceptedBulkWorkIds.contains(bulkWorkId)
+
   def isInProgress(workId: String): Boolean = workInProgress.contains(workId)
+
   def isDone(workId: String): Boolean = doneWorkIds.contains(workId)
 
   def updated(event: WorkDomainEvent): WorkState = event match {
-    case WorkAccepted(work) ⇒
+    case WorkAccepted(bulkWork) ⇒
       copy(
-        pendingWork = pendingWork enqueue work,
-        acceptedWorkIds = acceptedWorkIds + work.workId)
+        pendingWork = pendingWork ++ bulkWork.bulkJob,
+        acceptedBulkWorkIds = acceptedBulkWorkIds + bulkWork.id)
 
     case WorkStarted(workId) ⇒
       val (work, rest) = pendingWork.dequeue

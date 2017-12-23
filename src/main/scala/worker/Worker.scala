@@ -8,9 +8,10 @@ import akka.actor._
 import scala.concurrent.duration._
 
 /**
- * The worker is actually more of a middle manager, delegating the actual work
- * to the WorkExecutor, supervising it and keeping itself available to interact with the work master.
- */
+  * The worker is actually more of a middle manager, delegating the actual work
+  * to the WorkExecutor, supervising it and keeping itself available to interact with the work
+  * master.
+  */
 object Worker {
 
   def props(masterProxy: ActorRef): Props = Props(new Worker(masterProxy))
@@ -18,22 +19,25 @@ object Worker {
 }
 
 class Worker(masterProxy: ActorRef)
-  extends Actor with Timers with ActorLogging {
+    extends Actor with Timers with ActorLogging {
+
   import MasterWorkerProtocol._
   import context.dispatcher
 
-
   val workerId = UUID.randomUUID().toString
-  val registerInterval = context.system.settings.config.getDuration("distributed-workers.worker-registration-interval").getSeconds.seconds
+  val registerInterval = context.system.settings.config.getDuration("distributed-workers" +
+      ".worker-registration-interval").getSeconds.seconds
 
-  val registerTask = context.system.scheduler.schedule(0.seconds, registerInterval, masterProxy, RegisterWorker(workerId))
+  val registerTask = context.system.scheduler.schedule(0.seconds, registerInterval, masterProxy,
+    RegisterWorker(workerId))
 
   val workExecutor = createScraper()
 
   var currentWorkId: Option[String] = None
+
   def workId: String = currentWorkId match {
     case Some(workId) => workId
-    case None         => throw new IllegalStateException("Not working")
+    case None => throw new IllegalStateException("Not working")
   }
 
   def receive = idle
@@ -46,13 +50,13 @@ class Worker(masterProxy: ActorRef)
     case Work(workId, job: String) =>
       log.info("Got work: {}", job)
       currentWorkId = Some(workId)
-      workExecutor ! ProfileScraper.DoWork(job)
+      workExecutor ! Scraper.Scrape(job)
       context.become(working)
 
   }
 
   def working: Receive = {
-    case ProfileScraper.WorkComplete(result) =>
+    case Scraper.Complete(result) =>
       log.info("Work is complete. Result {}.", result)
       masterProxy ! WorkIsDone(workerId, workId, result)
       context.setReceiveTimeout(5.seconds)
@@ -76,9 +80,9 @@ class Worker(masterProxy: ActorRef)
   }
 
   def createScraper(): ActorRef =
-    // in addition to starting the actor we also watch it, so that
-    // if it stops this worker will also be stopped
-    context.watch(context.actorOf(ProfileScraper.props, "scraper"))
+  // in addition to starting the actor we also watch it, so that
+  // if it stops this worker will also be stopped
+    context.watch(context.actorOf(Scraper.props, "scraper"))
 
   override def supervisorStrategy = OneForOneStrategy() {
     case _: ActorInitializationException => Stop

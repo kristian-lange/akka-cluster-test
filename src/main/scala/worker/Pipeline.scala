@@ -1,15 +1,13 @@
 package worker
 
 import akka.actor.{Actor, ActorLogging, Props}
-import akka.cluster.pubsub.DistributedPubSub
-import akka.cluster.pubsub.DistributedPubSubMediator
+import akka.cluster.pubsub.{DistributedPubSub, DistributedPubSubMediator}
 
-object ProfilePipeline {
-  def props: Props = Props(new ProfilePipeline)
+object Pipeline {
+  def props: Props = Props(new Pipeline)
 }
 
-// #work-result-consumer
-class ProfilePipeline extends Actor with ActorLogging {
+class Pipeline extends Actor with ActorLogging {
 
   val mediator = DistributedPubSub(context.system).mediator
   mediator ! DistributedPubSubMediator.Subscribe(Master.ResultsTopic, self)
@@ -21,4 +19,3 @@ class ProfilePipeline extends Actor with ActorLogging {
   }
 
 }
-// #work-result-consumer

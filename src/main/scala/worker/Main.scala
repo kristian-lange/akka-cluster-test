@@ -3,13 +3,26 @@ package worker
 import akka.actor.ActorSystem
 import com.typesafe.config.{Config, ConfigFactory}
 
+
+/**
+  * Used this as template: https://developer.lightbend.com/guides/akka-distributed-workers-scala
+  * Blog post: http://letitcrash.com/post/29044669086/balancing-workload-across-nodes-with-akka-2
+  *
+  * WorkManager (Actor)
+  * - prepares bulk work (list of e.g. 1000 work with a page distribution according to page
+  * priority): looks up DB (table scraperinfo for page(_class) and priority and table 'profile'
+  * for URLs and state)
+  * - profile has state ('link', 'update', 'pending', 'scraped'), 'lastScraped' (date) and
+  * 'whenScraped' (list of dates)
+  * - Master finds list of pendingWork nearly empty and asks WorkManager to send a new bulk job
+  *
+  * TODO master crashes: forever .Worker - No ack from master, resending work result
+  */
 object Main {
 
   // note that 2551 and 2552 are expected to be seed nodes though, even if
   // the Master starts at 2000
   val masterPortRange = 2000 to 2999
-
-  val scraperJobManagerPortRange = 3000 to 3999
 
   def main(args: Array[String]): Unit = {
     args.headOption match {
@@ -20,18 +33,14 @@ object Main {
       case Some(portString) if portString.matches("""\d+""") =>
         val port = portString.toInt
         if (masterPortRange.contains(port)) startMaster(port)
-        else if (scraperJobManagerPortRange.contains(port)) startScraperJobManager(port)
         else startWorker(port, args.lift(1).map(_.toInt).getOrElse(1))
     }
   }
 
   def startClusterInSameJvm(): Unit = {
-    // two backend nodes
+    // two master nodes
     startMaster(2551)
     startMaster(2552)
-    // two scraper-job-manager nodes
-    startScraperJobManager(3000)
-    startScraperJobManager(3001)
     // two worker nodes with two worker actors each
     startWorker(5001, 2)
     startWorker(5002, 2)
@@ -46,15 +55,6 @@ object Main {
   }
 
   /**
-    * Start a ScraperJobManger node that will submit work to the master nodes
-    */
-  def startScraperJobManager(port: Int): Unit = {
-    val system = ActorSystem("ClusterSystem", config(port, "scraper-job-manager"))
-    system.actorOf(ScraperJobManager.props, "scraper-job-manager")
-    system.actorOf(ProfilePipeline.props, "profile-pipeline")
-  }
-
-  /**
     * Start a worker node, with n actual workers that will accept and process workloads
     */
   def startWorker(port: Int, workers: Int): Unit = {
@@ -66,6 +66,7 @@ object Main {
     (1 to workers).foreach(n =>
       system.actorOf(Worker.props(masterProxy), s"worker-$n")
     )
+    system.actorOf(Pipeline.props, "pipeline")
   }
 
   def config(port: Int, role: String): Config =
