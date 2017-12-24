@@ -16,7 +16,12 @@ import com.typesafe.config.{Config, ConfigFactory}
   * 'whenScraped' (list of dates)
   * - Master finds list of pendingWork nearly empty and asks WorkManager to send a new bulk job
   *
-  * TODO master crashes: forever .Worker - No ack from master, resending work result
+  * TODO master crashes: forever .Worker - No ack from master, resending work result: ok
+  * TODO persistence with failover like master
+  * TODO work -> job (better worker != work)
+  * TODO if master crashes -> kill workmanager and persistence too
+  * TODO new master starts -> in DB all profiles 'pending' to 'update'/'link'
+  * TODO WARN  a.c.AutoDown - Don't use auto-down feature of Akka Cluster in production. See 'Auto-downing (DO NOT USE)' section of Akka Cluster documentation.
   */
 object Main {
 
@@ -66,7 +71,6 @@ object Main {
     (1 to workers).foreach(n =>
       system.actorOf(Worker.props(masterProxy), s"worker-$n")
     )
-    system.actorOf(Pipeline.props, "pipeline")
   }
 
   def config(port: Int, role: String): Config =

@@ -81,10 +81,10 @@ object DistributedWorkerSpec {
       currentWorkIdAndSender = None
 
       {
-        case work: Work =>
+        case work: WorkOrder =>
           log.debug("Forwarding some work: {}", work)
           sendWork(work)
-          currentWorkIdAndSender = Some((work.workId, sender()))
+          currentWorkIdAndSender = Some((work.id, sender()))
           context.become(busy(work))
       }
     }
@@ -174,18 +174,18 @@ class DistributedWorkerSpec(_system: ActorSystem)
     }
 
     // make sure we can get one piece of work through to fail fast if it doesn't
-    frontend ! Work("1", 1)
+    frontend ! WorkOrder("1", 1)
     expectMsg("ok-1")
     within(10.seconds) {
       awaitAssert {
-        results.expectMsgType[WorkResult].workId should be("1")
+        results.expectMsgType[WorkResult].id should be("1")
       }
     }
 
 
     // and then send in some actual work
     for (n <- 2 to 100) {
-      frontend ! Work(n.toString, n)
+      frontend ! WorkOrder(n.toString, n)
       expectMsg(s"ok-$n")
     }
     system.log.info("99 work items sent")

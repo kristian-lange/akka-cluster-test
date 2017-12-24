@@ -14,7 +14,7 @@ object MasterWorkerProtocol {
   case class WorkFailed(workerId: String, workId: String)
 
   // Messages to Workers
-  case object WorkIsReady
+  case object WorkIsAvailable
 
   case class Ack(id: String)
 

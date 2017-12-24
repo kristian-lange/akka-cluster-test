@@ -13,7 +13,7 @@ object WorkManager {
 
   def props: Props = Props(new WorkManager)
 
-  val bulkWorkSize = 1000
+  val bulkOrderSize = 1000
 
   private case object NotOk
 
@@ -30,50 +30,59 @@ class WorkManager extends Actor with ActorLogging with Timers {
 
   def nextId(): String = UUID.randomUUID().toString
 
-  val pages = Array("http://www.linkedin.com/", "http://www.xing.de/", "http://www.facebook.com/")
+  val dummyData = Vector(
+    "LinkedinProfileScraper" -> "http://www.linkedin.com/",
+    "XingProfileScraper" -> "http://www.xing.de/",
+    "FacebookProfileScraper" -> "http://www.facebook.com/")
 
   val random = new scala.util.Random
+
+  def nextProfile(): Profile = {
+    userCounter += 1
+    val d = dummyData(random.nextInt(dummyData.size))
+    Profile(nextId(), d._2 + userCounter, d._1, 6)
+  }
 
   def receive = idle
 
   def idle: Receive = {
-    case WorkManagerMasterProtocol.MasterRequestsBulkWork =>
-      val bulkWork = produceBulkWork()
-      context.become(busy(bulkWork))
+    case WorkManagerMasterProtocol.MasterRequestsBulkOrder =>
+      val bulkOrder = generateBulkOrder()
+      context.become(busy(bulkOrder))
   }
 
-  def busy(bulkWorkInProgress: BulkWork): Receive = {
-    sendWork(bulkWorkInProgress)
+  def busy(bulkOrderInProgress: BulkOrder): Receive = {
+    sendWork(bulkOrderInProgress)
 
     {
-      case WorkManagerMasterProtocol.Ack(id) =>
-        log.info("Got ack for bulk work ID {}", id)
+      case WorkManagerMasterProtocol.Ack(bulkId) =>
+        log.info("Got ack for bulk order {}", bulkId.substring(0, 8))
         context.become(idle)
 
       case NotOk =>
-        log.info("Bulk work {} not accepted, retry after a while", bulkWorkInProgress.id)
+        log.info("Bulk work {} not accepted, retry after a while",
+          bulkOrderInProgress.bulkId.substring(0, 8))
         timers.startSingleTimer("retry", Retry, 3.seconds)
 
       case Retry =>
-        log.info("Retry sending bulk work {}", bulkWorkInProgress.id)
-        sendWork(bulkWorkInProgress)
+        log.info("Retry sending bulk order {}", bulkOrderInProgress.bulkId.substring(0, 8))
+        sendWork(bulkOrderInProgress)
     }
   }
 
-  def sendWork(bulkWork: BulkWork): Unit = {
+  def sendWork(bulkWork: BulkOrder): Unit = {
     implicit val timeout = Timeout(5.seconds)
     (sender() ? bulkWork).recover {
       case _ => NotOk
     } pipeTo self
   }
 
-  private def produceBulkWork() = {
-    val bulkJob = Queue.fill(bulkWorkSize) {
-      userCounter += 1
-      val nextUrl = pages(random.nextInt(3)) + userCounter
-      Work(nextId(), nextUrl)
+  private def generateBulkOrder() = {
+    val bulk = Queue.fill(bulkOrderSize) {
+      val profile = nextProfile()
+      WorkOrder(profile._id, profile)
     }
-    BulkWork(nextId(), bulkJob)
+    BulkOrder(nextId(), bulk)
   }
 
 }

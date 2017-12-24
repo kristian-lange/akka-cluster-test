@@ -47,24 +47,30 @@ class Worker(masterProxy: ActorRef)
   def receive = idle
 
   def idle: Receive = {
-    case Work(workId, job: String) =>
-      log.info("Got work: {}", job)
-      currentWorkId = Some(workId)
-      workExecutor ! Scraper.Scrape(job)
+    case WorkIsAvailable =>
+      // this is the only state where we reply to WorkIsReady
+      masterProxy ! WorkerRequestsWork(workerId)
+
+    case WorkOrder(id: String, profile: Profile) =>
+      log.info("Got scrape work: {}", id.substring(0, 8))
+      currentWorkId = Some(id)
+      workExecutor ! Scraper.Scrape(profile)
       context.become(working)
 
+    case WorkOrder(id: String, _) =>
+      log.warning("I only work with profiles at this time. I can't accept work {}.",
+        id.substring(0, 8))
   }
 
   def working: Receive = {
-    case Scraper.Complete(result) =>
-      log.info("Work is complete. Result {}.", result)
-      masterProxy ! WorkIsDone(workerId, workId, result)
+    case Scraper.Complete(profile) =>
+      log.info("Scrape work is complete: {}", profile._id.substring(0, 8))
+      masterProxy ! WorkIsDone(workerId, workId, profile)
       context.setReceiveTimeout(5.seconds)
-      context.become(waitForWorkIsDoneAck(result))
+      context.become(waitForWorkIsDoneAck(profile))
 
-    case _: Work =>
+    case _: WorkOrder =>
       log.warning("Yikes. Master told me to do work, while I'm already working.")
-
   }
 
   def waitForWorkIsDoneAck(result: Any): Receive = {
@@ -74,9 +80,8 @@ class Worker(masterProxy: ActorRef)
       context.become(idle)
 
     case ReceiveTimeout =>
-      log.info("No ack from master, resending work result")
+      log.info("No ack from master, resending work result {}", workId.substring(0, 8))
       masterProxy ! WorkIsDone(workerId, workId, result)
-
   }
 
   def createScraper(): ActorRef =
