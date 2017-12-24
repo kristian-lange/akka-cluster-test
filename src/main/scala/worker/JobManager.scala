@@ -9,11 +9,9 @@ import akka.util.Timeout
 import scala.collection.immutable.Queue
 import scala.concurrent.duration._
 
-object WorkManager {
+object JobManager {
 
-  def props: Props = Props(new WorkManager)
-
-  val bulkOrderSize = 1000
+  def props: Props = Props(new JobManager)
 
   private case object NotOk
 
@@ -21,10 +19,12 @@ object WorkManager {
 
 }
 
-class WorkManager extends Actor with ActorLogging with Timers {
+class JobManager extends Actor with ActorLogging with Timers {
 
-  import WorkManager._
+  import JobManager._
   import context.dispatcher
+
+  val bulkOrderSize = context.system.settings.config.getInt("distributed-workers.bulk-order-size")
 
   var userCounter = 0
 
@@ -46,33 +46,33 @@ class WorkManager extends Actor with ActorLogging with Timers {
   def receive = idle
 
   def idle: Receive = {
-    case WorkManagerMasterProtocol.MasterRequestsBulkOrder =>
+    case JobManagerMasterProtocol.MasterRequestsBulkOrder =>
       val bulkOrder = generateBulkOrder()
       context.become(busy(bulkOrder))
   }
 
   def busy(bulkOrderInProgress: BulkOrder): Receive = {
-    sendWork(bulkOrderInProgress)
+    sendBulkOrder(bulkOrderInProgress)
 
     {
-      case WorkManagerMasterProtocol.Ack(bulkId) =>
+      case JobManagerMasterProtocol.Ack(bulkId) =>
         log.info("Got ack for bulk order {}", bulkId.substring(0, 8))
         context.become(idle)
 
       case NotOk =>
-        log.info("Bulk work {} not accepted, retry after a while",
+        log.info("Bulk order {} not accepted, retry after a while",
           bulkOrderInProgress.bulkId.substring(0, 8))
         timers.startSingleTimer("retry", Retry, 3.seconds)
 
       case Retry =>
         log.info("Retry sending bulk order {}", bulkOrderInProgress.bulkId.substring(0, 8))
-        sendWork(bulkOrderInProgress)
+        sendBulkOrder(bulkOrderInProgress)
     }
   }
 
-  def sendWork(bulkWork: BulkOrder): Unit = {
+  def sendBulkOrder(bulkOrder: BulkOrder): Unit = {
     implicit val timeout = Timeout(5.seconds)
-    (sender() ? bulkWork).recover {
+    (sender() ? bulkOrder).recover {
       case _ => NotOk
     } pipeTo self
   }
@@ -80,7 +80,7 @@ class WorkManager extends Actor with ActorLogging with Timers {
   private def generateBulkOrder() = {
     val bulk = Queue.fill(bulkOrderSize) {
       val profile = nextProfile()
-      WorkOrder(profile._id, profile)
+      JobOrder(profile._id, profile)
     }
     BulkOrder(nextId(), bulk)
   }

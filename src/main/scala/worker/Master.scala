@@ -1,5 +1,7 @@
 package worker
 
+import java.util.concurrent.TimeUnit
+
 import akka.actor.{Actor, ActorLogging, ActorRef, Props, Timers}
 import akka.cluster.pubsub.{DistributedPubSub, DistributedPubSubMediator}
 
@@ -12,48 +14,54 @@ object Master {
 
   val ResultsTopic = "results"
 
-  def props(workTimeout: FiniteDuration): Props = Props(new Master(workTimeout))
+  val jobCheckIntervall = FiniteDuration(10, TimeUnit.SECONDS)
+
+  def props(jobTimeout: FiniteDuration): Props = Props(new Master(jobTimeout))
 
   private sealed trait WorkerStatus
 
   private case object Idle extends WorkerStatus
 
-  private case class Busy(workId: String, deadline: Deadline) extends WorkerStatus
+  private case class Busy(jobId: String, deadline: Deadline) extends WorkerStatus
 
   private case class WorkerState(ref: ActorRef, status: WorkerStatus, staleWorkerDeadline: Deadline)
 
-  private case object CleanupTick
+  private case object WorkerMaintenanceTick
+
+  private case object JobCheckTick
 
 }
 
-class Master(workTimeout: FiniteDuration) extends Actor with Timers with ActorLogging {
+class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLogging {
 
   import Master._
-  import WorkState._
+  import JobState._
 
   val considerWorkerDeadAfter: FiniteDuration =
     context.system.settings.config.getDuration("distributed-workers.consider-worker-dead-after")
         .getSeconds.seconds
 
+  val lowJobsLimit = context.system.settings.config.getInt("distributed-workers.low-jobs-limit")
+
   def newStaleWorkerDeadline(): Deadline = considerWorkerDeadAfter.fromNow
 
-  timers.startPeriodicTimer("cleanup", CleanupTick, workTimeout / 2)
+  timers.startPeriodicTimer("worker-maintenance", WorkerMaintenanceTick, jobTimeout / 2)
 
-  // Start work manager actor and watch it: if the work manager crashes -> this master stops and
+  timers.startPeriodicTimer("jobs-check", JobCheckTick, jobCheckIntervall)
+
+  // Start job-manager actor and watch it: if the actor crashes -> this master stops and
   // hopefully the other master takes over
-  val workManager = context.watch(context.actorOf(WorkManager.props, "workManager"))
+  val jobManager = context.watch(context.actorOf(JobManager.props, "job-manager"))
 
-  // Start persistence actor and watch it: if persistence crashes -> this master stops and
+  // Start persistence actor and watch it: if the actor crashes -> this master stops and
   // hopefully the other master takes over
   context.watch(context.actorOf(Persistence.props, "persistence"))
 
   val mediator: ActorRef = DistributedPubSub(context.system).mediator
 
-  // the set of available workers is not event sourced as it depends on the current set of workers
   private var workers = Map[String, WorkerState]()
 
-  // workState is event sourced to be able to make sure work is processed even in case of crash
-  private var workState = WorkState.empty
+  private var jobState = JobState.empty
 
   override def receive: Receive = {
     case MasterWorkerProtocol.RegisterWorker(workerId) =>
@@ -69,16 +77,16 @@ class Master(workTimeout: FiniteDuration) extends Actor with Timers with ActorLo
           staleWorkerDeadline = newStaleWorkerDeadline())
         workers += (workerId -> initialWorkerState)
 
-        if (workState.hasWork)
-          sender() ! MasterWorkerProtocol.WorkIsAvailable
+        if (jobState.hasJobs)
+          sender() ! MasterWorkerProtocol.JobIsAvailable
       }
 
     case MasterWorkerProtocol.DeRegisterWorker(workerId) =>
       workers.get(workerId) match {
-        case Some(WorkerState(_, Busy(workId, _), _)) =>
+        case Some(WorkerState(_, Busy(jobId, _), _)) =>
           // there was a workload assigned to the worker when it left
           log.info("Busy worker de-registered: {}", workerId.substring(0, 8))
-          workState = workState.updated(WorkerFailed(workId))
+          jobState = jobState.updated(WorkerFailed(jobId))
           notifyWorkers()
         case Some(_) =>
           log.info("Worker de-registered: {}", workerId.substring(0, 8))
@@ -86,70 +94,71 @@ class Master(workTimeout: FiniteDuration) extends Actor with Timers with ActorLo
       }
       workers -= workerId
 
-    case MasterWorkerProtocol.WorkerRequestsWork(workerId) =>
-      if (workState.hasWork) {
+    case MasterWorkerProtocol.WorkerRequestsJob(workerId) =>
+      if (jobState.hasJobs) {
         workers.get(workerId) match {
           case Some(workerState@WorkerState(_, Idle, _)) =>
-            val work = workState.nextWork
-            workState = workState.updated(WorkStarted(work.id))
-            log.info("Giving worker {} work {}",
-              workerId.substring(0, 8), work.id.substring(0, 8))
+            val job = jobState.nextJob
+            jobState = jobState.updated(JobStarted(job.jobId))
+            log.info("Giving worker {} job {}",
+              workerId.substring(0, 8), job.jobId.substring(0, 8))
             val newWorkerState = workerState.copy(
-              status = Busy(work.id, Deadline.now + workTimeout),
+              status = Busy(job.jobId, Deadline.now + jobTimeout),
               staleWorkerDeadline = newStaleWorkerDeadline())
             workers += (workerId -> newWorkerState)
-            sender() ! work
+            sender() ! job
           case _ =>
         }
       }
 
-    case MasterWorkerProtocol.WorkIsDone(workerId, workId, result) =>
+    case MasterWorkerProtocol.JobIsDone(workerId, jobId, result) =>
       // idempotent - redelivery from the worker may cause duplicates, so it needs to be
-      if (workState.isDone(workId)) {
+      if (jobState.isDone(jobId)) {
         // previous Ack was lost, confirm again that this is done
-        sender() ! MasterWorkerProtocol.Ack(workId)
+        sender() ! MasterWorkerProtocol.Ack(jobId)
       } else {
-        if (workState.isInProgress(workId)) {
-          log.info("Work {} completed by worker {}",
-            workId.substring(0, 8), workerId.substring(0, 8))
+        if (jobState.isInProgress(jobId)) {
+          log.info("Job {} completed by worker {}",
+            jobId.substring(0, 8), workerId.substring(0, 8))
         } else {
-          log.warning("Work {} is not in progress but reported as completed by worker {}.",
-            workId.substring(0, 8), workerId.substring(0, 8))
+          log.warning("Job {} isn't in progress at this master but reported as completed by " +
+              "worker {}.", jobId.substring(0, 8), workerId.substring(0, 8))
         }
-        changeWorkerToIdle(workerId, workId)
-        workState = workState.updated(WorkCompleted(workId, result))
-        mediator ! DistributedPubSubMediator.Publish(ResultsTopic, WorkResult(workId, result))
+        changeWorkerToIdle(workerId, jobId)
+        jobState = jobState.updated(JobCompleted(jobId, result))
+        mediator ! DistributedPubSubMediator.Publish(ResultsTopic, JobResult(jobId, result))
         // Ack back to original sender
-        sender ! MasterWorkerProtocol.Ack(workId)
+        sender ! MasterWorkerProtocol.Ack(jobId)
       }
 
-    case MasterWorkerProtocol.WorkFailed(workerId, workId) =>
-      if (workState.isInProgress(workId)) {
-        log.info("Work {} failed by worker {}",
-          workId.substring(0, 8), workerId.substring(0, 8))
-        changeWorkerToIdle(workerId, workId)
-        workState = workState.updated(WorkerFailed(workId))
+    case MasterWorkerProtocol.JobFailed(workerId, jobId) =>
+      if (jobState.isInProgress(jobId)) {
+        log.info("Job {} failed by worker {}",
+          jobId.substring(0, 8), workerId.substring(0, 8))
+        changeWorkerToIdle(workerId, jobId)
+        jobState = jobState.updated(WorkerFailed(jobId))
         notifyWorkers()
       }
 
     case bulkOrder: BulkOrder =>
       // idempotent
-      if (workState.isAccepted(bulkOrder.bulkId)) {
-        sender() ! WorkManagerMasterProtocol.Ack(bulkOrder.bulkId)
+      if (jobState.isAccepted(bulkOrder.bulkId)) {
+        sender() ! JobManagerMasterProtocol.Ack(bulkOrder.bulkId)
       } else {
-        log.info("Accepted bulk order: {}", bulkOrder.bulkId.substring(0, 8))
+        log.info("Accepted bulk order {}", bulkOrder.bulkId.substring(0, 8))
         // Ack back to original sender
-        sender() ! WorkManagerMasterProtocol.Ack(bulkOrder.bulkId)
-        workState = workState.updated(BulkOrderAccepted(bulkOrder))
+        sender() ! JobManagerMasterProtocol.Ack(bulkOrder.bulkId)
+        jobState = jobState.updated(BulkOrderAccepted(bulkOrder))
         notifyWorkers()
       }
 
-    case CleanupTick =>
+    case WorkerMaintenanceTick =>
       workers.foreach {
-        case (workerId, WorkerState(_, Busy(workId, timeout), _)) if timeout.isOverdue() =>
-          log.info("Work timed out: {}", workId.substring(0, 8))
+        case (workerId, WorkerState(_, Busy(jobId, timeout), _)) if timeout.isOverdue() =>
+          log.info("Job {} timed out: remove worker {}",
+            jobId.substring(0, 8), workerId.substring(0, 8))
           workers -= workerId
-          workState = workState.updated(WorkerTimedOut(workId))
+          jobState = jobState.updated(WorkerTimedOut(jobId))
           notifyWorkers()
 
         case (workerId, WorkerState(_, Idle, lastHeardFrom)) if lastHeardFrom.isOverdue() =>
@@ -158,22 +167,25 @@ class Master(workTimeout: FiniteDuration) extends Actor with Timers with ActorLo
 
         case _ => // this one is a keeper!
       }
-      if (workState.isLowInWork) {
-        workManager ! WorkManagerMasterProtocol.MasterRequestsBulkOrder
+
+    case JobCheckTick =>
+      if (jobState.pendingJobsSize < lowJobsLimit) {
+        log.info("Only {} jobs left: ask job-manager for more", jobState.pendingJobsSize)
+        jobManager ! JobManagerMasterProtocol.MasterRequestsBulkOrder
       }
   }
 
   def notifyWorkers(): Unit =
-    if (workState.hasWork) {
+    if (jobState.hasJobs) {
       workers.foreach {
-        case (_, WorkerState(ref, Idle, _)) => ref ! MasterWorkerProtocol.WorkIsAvailable
+        case (_, WorkerState(ref, Idle, _)) => ref ! MasterWorkerProtocol.JobIsAvailable
         case _ => // busy
       }
     }
 
-  def changeWorkerToIdle(workerId: String, workId: String): Unit =
+  def changeWorkerToIdle(workerId: String, jobId: String): Unit =
     workers.get(workerId) match {
-      case Some(workerState@WorkerState(_, Busy(`workId`, _), _)) ⇒
+      case Some(workerState@WorkerState(_, Busy(`jobId`, _), _)) ⇒
         val newWorkerState = workerState.copy(status = Idle, staleWorkerDeadline =
             newStaleWorkerDeadline())
         workers += (workerId -> newWorkerState)

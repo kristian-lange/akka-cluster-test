@@ -8,8 +8,8 @@ import akka.actor._
 import scala.concurrent.duration._
 
 /**
-  * The worker is actually more of a middle manager, delegating the actual work
-  * to the WorkExecutor, supervising it and keeping itself available to interact with the work
+  * The worker is actually more of a middle manager, delegating the actual jobs
+  * to the job executors, supervising it and keeping itself available to interact with the
   * master.
   */
 object Worker {
@@ -33,55 +33,55 @@ class Worker(masterProxy: ActorRef)
 
   val workExecutor = createScraper()
 
-  var currentWorkId: Option[String] = None
+  var currentJobId: Option[String] = None
 
-  def workId: String = currentWorkId match {
-    case Some(workId) => workId
+  def jobId: String = currentJobId match {
+    case Some(jobId) => jobId
     case None => throw new IllegalStateException("Not working")
   }
 
   override def preStart(): Unit = {
-    masterProxy ! WorkerRequestsWork(workerId)
+    masterProxy ! WorkerRequestsJob(workerId)
   }
 
   def receive = idle
 
   def idle: Receive = {
-    case WorkIsAvailable =>
-      // this is the only state where we reply to WorkIsReady
-      masterProxy ! WorkerRequestsWork(workerId)
+    case JobIsAvailable =>
+      // This is the only state where we reply to JobIsAvailable
+      masterProxy ! WorkerRequestsJob(workerId)
 
-    case WorkOrder(id: String, profile: Profile) =>
-      log.info("Got scrape work: {}", id.substring(0, 8))
-      currentWorkId = Some(id)
+    case JobOrder(jobId: String, profile: Profile) =>
+      log.info("Got scrape job {}", jobId.substring(0, 8))
+      currentJobId = Some(jobId)
       workExecutor ! Scraper.Scrape(profile)
       context.become(working)
 
-    case WorkOrder(id: String, _) =>
-      log.warning("I only work with profiles at this time. I can't accept work {}.",
-        id.substring(0, 8))
+    case JobOrder(jobId: String, _) =>
+      log.warning("I only work with profiles at this time. I can't accept job {}.",
+        jobId.substring(0, 8))
   }
 
   def working: Receive = {
     case Scraper.Complete(profile) =>
-      log.info("Scrape work is complete: {}", profile._id.substring(0, 8))
-      masterProxy ! WorkIsDone(workerId, workId, profile)
+      log.info("Scrape job {} complete", profile._id.substring(0, 8))
+      masterProxy ! JobIsDone(workerId, jobId, profile)
       context.setReceiveTimeout(5.seconds)
-      context.become(waitForWorkIsDoneAck(profile))
+      context.become(waitForJobIsDoneAck(profile))
 
-    case _: WorkOrder =>
-      log.warning("Yikes. Master told me to do work, while I'm already working.")
+    case JobOrder(jobId: String, _) =>
+      log.warning("Yikes. Master told me to do job {}, while I'm already working.", jobId)
   }
 
-  def waitForWorkIsDoneAck(result: Any): Receive = {
-    case Ack(id) if id == workId =>
-      masterProxy ! WorkerRequestsWork(workerId)
+  def waitForJobIsDoneAck(result: Any): Receive = {
+    case Ack(id) if id == jobId =>
+      masterProxy ! WorkerRequestsJob(workerId)
       context.setReceiveTimeout(Duration.Undefined)
       context.become(idle)
 
     case ReceiveTimeout =>
-      log.info("No ack from master, resending work result {}", workId.substring(0, 8))
-      masterProxy ! WorkIsDone(workerId, workId, result)
+      log.info("No ack from master, resending job result {}", jobId.substring(0, 8))
+      masterProxy ! JobIsDone(workerId, jobId, result)
   }
 
   def createScraper(): ActorRef =
@@ -92,7 +92,7 @@ class Worker(masterProxy: ActorRef)
   override def supervisorStrategy = OneForOneStrategy() {
     case _: ActorInitializationException => Stop
     case _: Exception =>
-      currentWorkId foreach { workId => masterProxy ! WorkFailed(workerId, workId) }
+      currentJobId foreach { jobId => masterProxy ! JobFailed(workerId, jobId) }
       context.become(idle)
       Restart
   }

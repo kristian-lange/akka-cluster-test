@@ -8,20 +8,21 @@ import com.typesafe.config.{Config, ConfigFactory}
   * Used this as template: https://developer.lightbend.com/guides/akka-distributed-workers-scala
   * Blog post: http://letitcrash.com/post/29044669086/balancing-workload-across-nodes-with-akka-2
   *
-  * WorkManager (Actor)
-  * - prepares bulk work (list of e.g. 1000 work with a page distribution according to page
+  * JobManager (Actor)
+  * - prepares bulk order (list of e.g. 1000 jobs with a page distribution according to page
   * priority): looks up DB (table scraperinfo for page(_class) and priority and table 'profile'
   * for URLs and state)
   * - profile has state ('link', 'update', 'pending', 'scraped'), 'lastScraped' (date) and
   * 'whenScraped' (list of dates)
-  * - Master finds list of pendingWork nearly empty and asks WorkManager to send a new bulk job
+  * - Master finds list of pendingJobs nearly empty and asks JobManager to send a new bulk job
   *
-  * TODO master crashes: forever .Worker - No ack from master, resending work result: ok
+  * TODO master crashes: forever .Worker - No ack from master, resending job result: ok
   * TODO persistence with failover like master
   * TODO work -> job (better worker != work)
   * TODO if master crashes -> kill workmanager and persistence too
   * TODO new master starts -> in DB all profiles 'pending' to 'update'/'link'
   * TODO WARN  a.c.AutoDown - Don't use auto-down feature of Akka Cluster in production. See 'Auto-downing (DO NOT USE)' section of Akka Cluster documentation.
+  * TODO logback file logging with rolling
   */
 object Main {
 

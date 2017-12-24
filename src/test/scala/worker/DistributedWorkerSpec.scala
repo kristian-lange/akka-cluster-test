@@ -68,7 +68,7 @@ object DistributedWorkerSpec {
     }
   }
 
-  class RemoteControllableFrontend extends WorkManager {
+  class RemoteControllableFrontend extends JobManager {
 
     var currentWorkIdAndSender: Option[(String, ActorRef)] = None
 
@@ -81,10 +81,10 @@ object DistributedWorkerSpec {
       currentWorkIdAndSender = None
 
       {
-        case work: WorkOrder =>
+        case work: JobOrder =>
           log.debug("Forwarding some work: {}", work)
-          sendWork(work)
-          currentWorkIdAndSender = Some((work.id, sender()))
+          sendBulkOrder(work)
+          currentWorkIdAndSender = Some((work.jobId, sender()))
           context.become(busy(work))
       }
     }
@@ -174,24 +174,24 @@ class DistributedWorkerSpec(_system: ActorSystem)
     }
 
     // make sure we can get one piece of work through to fail fast if it doesn't
-    frontend ! WorkOrder("1", 1)
+    frontend ! JobOrder("1", 1)
     expectMsg("ok-1")
     within(10.seconds) {
       awaitAssert {
-        results.expectMsgType[WorkResult].id should be("1")
+        results.expectMsgType[JobResult].jobId should be("1")
       }
     }
 
 
     // and then send in some actual work
     for (n <- 2 to 100) {
-      frontend ! WorkOrder(n.toString, n)
+      frontend ! JobOrder(n.toString, n)
       expectMsg(s"ok-$n")
     }
     system.log.info("99 work items sent")
 
     results.within(20.seconds) {
-      val ids = results.receiveN(99).map { case WorkResult(workId, _) => workId }
+      val ids = results.receiveN(99).map { case JobResult(workId, _) => workId }
       // nothing lost, and no duplicates
       ids.toVector.map(_.toInt).sorted should be((2 to 100).toVector)
     }

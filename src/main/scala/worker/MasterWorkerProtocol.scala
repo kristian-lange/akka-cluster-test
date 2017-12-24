@@ -7,15 +7,15 @@ object MasterWorkerProtocol {
 
   case class DeRegisterWorker(workerId: String)
 
-  case class WorkerRequestsWork(workerId: String)
+  case class WorkerRequestsJob(workerId: String)
 
-  case class WorkIsDone(workerId: String, workId: String, result: Any)
+  case class JobIsDone(workerId: String, jobId: String, result: Any)
 
-  case class WorkFailed(workerId: String, workId: String)
+  case class JobFailed(workerId: String, jobId: String)
 
   // Messages to Workers
-  case object WorkIsAvailable
+  case object JobIsAvailable
 
-  case class Ack(id: String)
+  case class Ack(jobId: String)
 
 }
