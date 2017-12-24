@@ -1,4 +1,4 @@
-package worker
+package akka
 
 import akka.actor.{Actor, ActorLogging, Props}
 import akka.cluster.pubsub.{DistributedPubSub, DistributedPubSubMediator}

@@ -1,4 +1,4 @@
-package worker
+package akka
 
 import scala.collection.immutable.Queue
 

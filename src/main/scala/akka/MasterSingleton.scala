@@ -1,4 +1,4 @@
-package worker
+package akka
 
 import akka.actor.{ActorRef, ActorSystem, PoisonPill, Props}
 import akka.cluster.singleton._

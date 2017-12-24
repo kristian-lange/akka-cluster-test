@@ -1,4 +1,4 @@
-package worker
+package akka
 
 import akka.actor.ActorSystem
 import com.typesafe.config.{Config, ConfigFactory}
@@ -17,13 +17,19 @@ import com.typesafe.config.{Config, ConfigFactory}
   * - Master finds list of pendingJobs nearly empty and asks JobManager to send a new bulk job
   *
   * TODO master crashes: forever .Worker - No ack from master, resending job result: ok
-  * TODO persistence with failover like master
-  * TODO work -> job (better worker != work)
-  * TODO if master crashes -> kill workmanager and persistence too
+  * TODO persistence with failover like master: ok
+  * TODO work -> job (better worker != work): ok
+  * TODO if master crashes -> kill jobmanager and persistence too
+  * TODO master supervises job-manager and persistence - what if one dies
+  * TODO worker supervises scraper
   * TODO new master starts -> in DB all profiles 'pending' to 'update'/'link'
   * TODO WARN  a.c.AutoDown - Don't use auto-down feature of Akka Cluster in production. See 'Auto-downing (DO NOT USE)' section of Akka Cluster documentation.
   * TODO logback file logging with rolling
   * TODO remove old jobs from JobState
+  * TODO interface with scraper-scripts: 1) get bulk link profiles called from JobManager,
+  *      2) write bulk into DB called from Persistence
+  * TODO use Gradle
+  * TODO tests
   */
 object Main {
 

@@ -1,4 +1,4 @@
-package worker
+package akka
 
 import java.util.concurrent.TimeUnit
 
