@@ -193,7 +193,7 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
       // ok, might happen after standby recovery, worker state is not persisted
     }
 
-  def tooLongSinceHeardFrom(lastHeardFrom: Long) =
+  def tooLongSinceHeardFrom(lastHeardFrom: Long): Boolean =
     System.currentTimeMillis() - lastHeardFrom > considerWorkerDeadAfter.toMillis
 
 }

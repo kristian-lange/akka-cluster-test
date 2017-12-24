@@ -23,6 +23,7 @@ import com.typesafe.config.{Config, ConfigFactory}
   * TODO new master starts -> in DB all profiles 'pending' to 'update'/'link'
   * TODO WARN  a.c.AutoDown - Don't use auto-down feature of Akka Cluster in production. See 'Auto-downing (DO NOT USE)' section of Akka Cluster documentation.
   * TODO logback file logging with rolling
+  * TODO remove old jobs from JobState
   */
 object Main {
 

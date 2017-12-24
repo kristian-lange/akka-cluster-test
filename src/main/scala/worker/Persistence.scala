@@ -14,7 +14,7 @@ class Persistence extends Actor with ActorLogging {
 
   def receive = {
     case _: DistributedPubSubMediator.SubscribeAck =>
-    case JobResult(jobId, profile: Profile) =>
+    case JobResult(_, profile: Profile) =>
       log.info("Stored profile {} in DB", profile._id.substring(0, 8))
     case JobResult(jobId, _) =>
       log.warning("Can't store anything but profiles at this point. Can't accept job {}.",

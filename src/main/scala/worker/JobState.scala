@@ -57,7 +57,7 @@ case class JobState private(private val pendingJobs: Queue[JobOrder],
         pendingJobs = rest,
         jobsInProgress = jobsInProgress + (jobId -> job))
 
-    case JobCompleted(jobId, result) ⇒
+    case JobCompleted(jobId, _) ⇒
       copy(
         jobsInProgress = jobsInProgress - jobId,
         doneJobIds = doneJobIds + jobId)
