@@ -1,0 +1,39 @@
+plugins {
+    id 'scala'
+    id 'maven-publish'
+    id 'application'
+}
+
+version = "1.0"
+
+def akkaVersion = "2.5.4"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile group: 'org.scala-lang', name: 'scala-library', version: '2.11.11'
+    compile group: 'com.typesafe.akka', name: 'akka-cluster_2.12', version: '2.5.4'
+    compile group: 'com.typesafe.akka', name: 'akka-cluster-tools_2.12', version: '2.5.4'
+    compile group: 'com.typesafe.akka', name: 'akka-slf4j_2.12', version: '2.5.4'
+    compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
+
+    testCompile group: 'com.typesafe.akka', name: 'akka-testkit_2.12', version: '2.5.4'
+    testCompile group: 'org.scalatest', name: 'scalatest_2.12', version: '3.0.1'
+    testCompile group: 'commons-io', name: 'commons-io', version: '2.4'
+}
+
+// Config application plugin's run task to define main class and run arguments
+run {
+    // Define main class either from command-line argument or use a default
+    if (project.hasProperty('main')) {
+        mainClassName = project.property('main')
+    } else {
+        mainClassName = 'akka.Main'
+    }
+    // Pass command-line argument to script.
+    if (project.hasProperty('args')) {
+        args project.property('args').split(',')
+    }
+}
