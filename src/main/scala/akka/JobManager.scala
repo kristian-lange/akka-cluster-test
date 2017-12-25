@@ -43,6 +43,14 @@ class JobManager extends Actor with ActorLogging with Timers {
     Profile(nextId(), d._2 + userCounter, d._1, 6)
   }
 
+  def generateBulkOrder() = {
+    val bulk = Queue.fill(bulkOrderSize) {
+      val profile = nextProfile()
+      JobOrder(profile._id, profile)
+    }
+    BulkOrder(nextId(), bulk)
+  }
+
   def receive = idle
 
   def idle: Receive = {
@@ -75,14 +83,6 @@ class JobManager extends Actor with ActorLogging with Timers {
     (sender() ? bulkOrder).recover {
       case _ => NotOk
     } pipeTo self
-  }
-
-  private def generateBulkOrder() = {
-    val bulk = Queue.fill(bulkOrderSize) {
-      val profile = nextProfile()
-      JobOrder(profile._id, profile)
-    }
-    BulkOrder(nextId(), bulk)
   }
 
 }
