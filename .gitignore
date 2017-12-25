@@ -5,3 +5,6 @@ target
 *.iws
 .idea
 out
+build/
+.gradle
+!/gradle/wrapper/gradle-wrapper.jar
