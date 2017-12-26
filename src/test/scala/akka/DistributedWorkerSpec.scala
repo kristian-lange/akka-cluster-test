@@ -34,9 +34,11 @@ object DistributedWorkerSpec {
     }
     distributed-workers.consider-worker-dead-after = 10s
     distributed-workers.worker-registration-interval = 1s
+    distributed-workers.bulk-order-size = 100
+    distributed-workers.low-jobs-limit = 101
     """).withFallback(ConfigFactory.load())
 
-  class FlakyWorkExecutor extends Actor with ActorLogging {
+  class FlakyScraper extends Actor with ActorLogging {
     var i = 0
 
     override def postRestart(reason: Throwable): Unit = {
@@ -55,13 +57,13 @@ object DistributedWorkerSpec {
           context.stop(self)
         } else {
           profile.state = 4
-          log.info("Cannot be trusted, but did complete work: {}", profile)
+          log.info("Cannot be trusted, but did complete job: {}", profile)
           sender() ! Scraper.Complete(profile)
         }
     }
   }
 
-  class FastWorkExecutor extends Actor with ActorLogging {
+  class FastScraper extends Actor with ActorLogging {
     def receive = {
       case Scraper.Scrape(profile: Profile) =>
         profile.state = 4
@@ -115,7 +117,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
 
   val workerSystem: ActorSystem = ActorSystem("DistributedWorkerSpec", clusterConfig)
 
-  "Distributed workers" should "perform work and publish results" in {
+  "Distributed workers" should "perform jobs and publish results" in {
     val clusterAddress = Cluster(masterSystem).selfAddress
     val clusterProbe = TestProbe()
     Cluster(masterSystem).subscribe(clusterProbe.ref, classOf[MemberUp])
@@ -123,9 +125,14 @@ class DistributedWorkerSpec(_system: ActorSystem)
     Cluster(masterSystem).join(clusterAddress)
     clusterProbe.expectMsgType[MemberUp]
 
+    val masterProps = Props(new Master(jobTimeout) {
+      override def createJobManager(): ActorRef = context.actorOf(Props(new
+              RemoteControllableJobManager), "job-manager")
+    })
+
     masterSystem.actorOf(
       ClusterSingletonManager.props(
-        Master.props(jobTimeout),
+        masterProps,
         PoisonPill,
         ClusterSingletonManagerSettings(system).withRole("master")),
       "master")
@@ -136,7 +143,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
       MasterSingleton.proxyProps(workerSystem),
       name = "masterProxy")
     val fastWorkerProps = Props(new Worker(masterProxy) {
-      override def createScraper(): ActorRef = context.actorOf(Props(new FastWorkExecutor),
+      override def createScraper(): ActorRef = context.actorOf(Props(new FastScraper),
         "fast-executor")
     })
 
@@ -145,7 +152,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
 
     val flakyWorkerProps = Props(new Worker(masterProxy) {
       override def createScraper(): ActorRef = {
-        context.actorOf(Props(new FlakyWorkExecutor), "flaky-executor")
+        context.actorOf(Props(new FlakyScraper), "flaky-executor")
       }
     })
     val flakyWorker = workerSystem.actorOf(flakyWorkerProps, "flaky-worker")
@@ -157,34 +164,21 @@ class DistributedWorkerSpec(_system: ActorSystem)
     DistributedPubSub(system).mediator ! Subscribe(Master.ResultsTopic, results.ref)
     expectMsgType[SubscribeAck]
 
-    // make sure pub sub topics are replicated over to the back-end system before triggering any
-    // work
-    within(10.seconds) {
+    // make sure pub sub topics are replicated over to the master system before triggering any jobs
+    within(100.seconds) {
       awaitAssert {
         DistributedPubSub(masterSystem).mediator ! GetTopics
         expectMsgType[CurrentTopics].getTopics() should contain(Master.ResultsTopic)
       }
     }
 
-    // make sure we can get one job through to fail fast if it doesn't
-    //jobManager ! JobOrder("1", Profile("1", "http://www.abc.com/123", "AbcProfileScraper", 6))
-    expectMsg("ok-1")
-    within(10.seconds) {
+    within(100.seconds) {
       awaitAssert {
         results.expectMsgType[JobResult].jobId should be("1")
       }
     }
 
-
-    // and then send in some actual job
-    for (n <- 2 to 100) {
-      //jobManager ! JobOrder(n.toString, Profile(n.toString, "http://www.abc.com/" + n,
-      //  "AbcProfileScraper", 6))
-      expectMsg(s"ok-$n")
-    }
-    system.log.info("99 job items sent")
-
-    results.within(20.seconds) {
+    results.within(200.seconds) {
       val ids = results.receiveN(99).map { case JobResult(jobId, _) => jobId }
       // nothing lost, and no duplicates
       ids.toVector.map(_.toInt).sorted should be((2 to 100).toVector)
