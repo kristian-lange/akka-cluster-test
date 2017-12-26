@@ -52,25 +52,26 @@ class Worker(masterProxy: ActorRef)
       masterProxy ! WorkerRequestsJob(workerId)
 
     case JobOrder(jobId: String, profile: Profile) =>
-      log.info("Got scrape job {}", jobId.substring(0, 8))
+      log.info("Got scrape job {}", Utils.first8Chars(jobId))
       currentJobId = Some(jobId)
       workExecutor ! Scraper.Scrape(profile)
       context.become(working)
 
     case JobOrder(jobId: String, _) =>
       log.warning("I only work with profiles at this time. I can't accept job {}.",
-        jobId.substring(0, 8))
+        Utils.first8Chars(jobId))
   }
 
   def working: Receive = {
     case Scraper.Complete(profile) =>
-      log.info("Scrape job {} complete", profile._id.substring(0, 8))
+      log.info("Scrape job {} complete", Utils.first8Chars(profile._id))
       masterProxy ! JobIsDone(workerId, jobId, profile)
       context.setReceiveTimeout(5.seconds)
       context.become(waitForJobIsDoneAck(profile))
 
     case JobOrder(jobId: String, _) =>
-      log.warning("Yikes. Master told me to do job {}, while I'm already working.", jobId)
+      log.warning("Yikes. Master told me to do job {}, while I'm already working.",
+        Utils.first8Chars(jobId))
   }
 
   def waitForJobIsDoneAck(result: Any): Receive = {
@@ -80,7 +81,7 @@ class Worker(masterProxy: ActorRef)
       context.become(idle)
 
     case ReceiveTimeout =>
-      log.info("No ack from master, resending job result {}", jobId.substring(0, 8))
+      log.info("No ack from master, resending job result {}", Utils.first8Chars(jobId))
       masterProxy ! JobIsDone(workerId, jobId, result)
   }
 

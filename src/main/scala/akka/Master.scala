@@ -49,9 +49,13 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
 
   timers.startPeriodicTimer("jobs-check", JobCheckTick, jobCheckIntervall)
 
-  // Start job-manager actor and watch it: if the actor crashes -> this master stops and
-  // hopefully the other master takes over
-  val jobManager = context.watch(context.actorOf(JobManager.props, "job-manager"))
+  val jobManager = createJobManager()
+
+  def createJobManager() = {
+    // Start job-manager actor and watch it: if the actor crashes -> this master stops and
+    // hopefully the other master takes over
+    context.watch(context.actorOf(JobManager.props, "job-manager"))
+  }
 
   // Start persistence actor and watch it: if the actor crashes -> this master stops and
   // hopefully the other master takes over
@@ -70,7 +74,7 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
           ref = sender(), staleWorkerDeadline = newStaleWorkerDeadline()
         ))
       } else {
-        log.info("Worker registered: {}", workerId.substring(0, 8))
+        log.info("Worker registered: {}", Utils.first8Chars(workerId))
         val initialWorkerState = WorkerState(
           ref = sender(),
           status = Idle,
@@ -85,11 +89,11 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
       workers.get(workerId) match {
         case Some(WorkerState(_, Busy(jobId, _), _)) =>
           // there was a workload assigned to the worker when it left
-          log.info("Busy worker de-registered: {}", workerId.substring(0, 8))
+          log.info("Busy worker de-registered: {}", Utils.first8Chars(workerId))
           jobState = jobState.updated(WorkerFailed(jobId))
           notifyWorkers()
         case Some(_) =>
-          log.info("Worker de-registered: {}", workerId.substring(0, 8))
+          log.info("Worker de-registered: {}", Utils.first8Chars(workerId))
         case _ =>
       }
       workers -= workerId
@@ -101,7 +105,7 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
             val job = jobState.nextJob
             jobState = jobState.updated(JobStarted(job.jobId))
             log.info("Giving worker {} job {}",
-              workerId.substring(0, 8), job.jobId.substring(0, 8))
+              Utils.first8Chars(workerId), Utils.first8Chars(job.jobId))
             val newWorkerState = workerState.copy(
               status = Busy(job.jobId, Deadline.now + jobTimeout),
               staleWorkerDeadline = newStaleWorkerDeadline())
@@ -119,10 +123,10 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
       } else {
         if (jobState.isInProgress(jobId)) {
           log.info("Job {} completed by worker {}",
-            jobId.substring(0, 8), workerId.substring(0, 8))
+            Utils.first8Chars(jobId), Utils.first8Chars(workerId))
         } else {
           log.warning("Job {} isn't in progress at this master but reported as completed by " +
-              "worker {}.", jobId.substring(0, 8), workerId.substring(0, 8))
+              "worker {}.", Utils.first8Chars(jobId), Utils.first8Chars(workerId))
         }
         changeWorkerToIdle(workerId, jobId)
         jobState = jobState.updated(JobCompleted(jobId, result))
@@ -134,7 +138,7 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
     case MasterWorkerProtocol.JobFailed(workerId, jobId) =>
       if (jobState.isInProgress(jobId)) {
         log.info("Job {} failed by worker {}",
-          jobId.substring(0, 8), workerId.substring(0, 8))
+          Utils.first8Chars(jobId), Utils.first8Chars(workerId))
         changeWorkerToIdle(workerId, jobId)
         jobState = jobState.updated(WorkerFailed(jobId))
         notifyWorkers()
@@ -145,7 +149,7 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
       if (jobState.isAccepted(bulkOrder.bulkId)) {
         sender() ! JobManagerMasterProtocol.Ack(bulkOrder.bulkId)
       } else {
-        log.info("Accepted bulk order {}", bulkOrder.bulkId.substring(0, 8))
+        log.info("Accepted bulk order {}", Utils.first8Chars(bulkOrder.bulkId))
         // Ack back to original sender
         sender() ! JobManagerMasterProtocol.Ack(bulkOrder.bulkId)
         jobState = jobState.updated(BulkOrderAccepted(bulkOrder))
@@ -156,13 +160,13 @@ class Master(jobTimeout: FiniteDuration) extends Actor with Timers with ActorLog
       workers.foreach {
         case (workerId, WorkerState(_, Busy(jobId, timeout), _)) if timeout.isOverdue() =>
           log.info("Job {} timed out: remove worker {}",
-            jobId.substring(0, 8), workerId.substring(0, 8))
+            Utils.first8Chars(jobId), Utils.first8Chars(workerId))
           workers -= workerId
           jobState = jobState.updated(WorkerTimedOut(jobId))
           notifyWorkers()
 
         case (workerId, WorkerState(_, Idle, lastHeardFrom)) if lastHeardFrom.isOverdue() =>
-          log.info("Too long since heard from worker {}, pruning", workerId.substring(0, 8))
+          log.info("Too long since heard from worker {}, pruning", Utils.first8Chars(workerId))
           workers -= workerId
 
         case _ => // this one is a keeper!

@@ -64,16 +64,16 @@ class JobManager extends Actor with ActorLogging with Timers {
 
     {
       case JobManagerMasterProtocol.Ack(bulkId) =>
-        log.info("Got ack for bulk order {}", bulkId.substring(0, 8))
+        log.info("Got ack for bulk order {}", Utils.first8Chars(bulkId))
         context.become(idle)
 
       case NotOk =>
         log.info("Bulk order {} not accepted, retry after a while",
-          bulkOrderInProgress.bulkId.substring(0, 8))
+          Utils.first8Chars(bulkOrderInProgress.bulkId))
         timers.startSingleTimer("retry", Retry, 3.seconds)
 
       case Retry =>
-        log.info("Retry sending bulk order {}", bulkOrderInProgress.bulkId.substring(0, 8))
+        log.info("Retry sending bulk order {}", Utils.first8Chars(bulkOrderInProgress.bulkId))
         sendBulkOrder(bulkOrderInProgress)
     }
   }
