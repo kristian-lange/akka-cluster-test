@@ -51,23 +51,35 @@ class Worker(masterProxy: ActorRef)
       // This is the only state where we reply to JobIsAvailable
       masterProxy ! WorkerRequestsJob(workerId)
 
-    case JobOrder(jobId: String, profile: Profile) =>
-      log.info("Got scrape job {}", Utils.first8Chars(jobId))
+    case JobOrder(jobId: String, job: Profile) =>
+      log.info("Got profile scrape job {}", Utils.first8Chars(jobId))
       currentJobId = Some(jobId)
-      workExecutor ! Scraper.Scrape(profile)
+      workExecutor ! Scraper.Scrape(job)
+      context.become(working)
+
+    case JobOrder(jobId: String, job: Portal) =>
+      log.info("Got portal scrape job {}", Utils.first8Chars(jobId))
+      currentJobId = Some(jobId)
+      workExecutor ! Scraper.Scrape(job)
       context.become(working)
 
     case JobOrder(jobId: String, _) =>
-      log.warning("I only work with profiles at this time. I can't accept job {}.",
+      log.warning("I only work with profiles or portals at this time. I can't accept job {}.",
         Utils.first8Chars(jobId))
   }
 
   def working: Receive = {
-    case Scraper.Complete(profile) =>
+    case Scraper.Complete(profile: Profile) =>
       log.info("Scrape job {} complete", Utils.first8Chars(profile._id))
       masterProxy ! JobIsDone(workerId, jobId, profile)
       context.setReceiveTimeout(5.seconds)
       context.become(waitForJobIsDoneAck(profile))
+
+    case Scraper.Complete(portal: Portal) =>
+      log.info("Scraped portal {}", portal._class)
+      masterProxy ! JobIsDone(workerId, jobId, portal)
+      context.setReceiveTimeout(5.seconds)
+      context.become(waitForJobIsDoneAck(portal))
 
     case JobOrder(jobId: String, _) =>
       log.warning("Yikes. Master told me to do job {}, while I'm already working.",

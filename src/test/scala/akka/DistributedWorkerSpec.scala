@@ -105,7 +105,7 @@ class DistributedWorkerSpec(_system: ActorSystem)
 
   import DistributedWorkerSpec._
 
-  val jobTimeout = 3.seconds
+  val jobTimeout = 600.seconds
 
   def this() = this(ActorSystem("DistributedWorkerSpec", DistributedWorkerSpec.clusterConfig))
 

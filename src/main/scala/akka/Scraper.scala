@@ -3,6 +3,7 @@ package akka
 import java.util.concurrent.ThreadLocalRandom
 
 import akka.actor.{Actor, ActorLogging, Props}
+import com.talentwunder.ScraperBaseClass
 
 import scala.concurrent.duration._
 
@@ -10,9 +11,9 @@ object Scraper {
 
   def props = Props(new Scraper)
 
-  case class Scrape(profile: Profile)
+  case class Scrape(job: Any)
 
-  case class Complete(profile: Profile)
+  case class Complete(job: Any)
 
 }
 
@@ -29,6 +30,16 @@ class Scraper extends Actor with ActorLogging {
       // simulate that the processing time varies
       val randomProcessingTime = ThreadLocalRandom.current.nextInt(1, 3).seconds
       context.system.scheduler.scheduleOnce(randomProcessingTime, sender(), Complete(profile))
+
+    case Scrape(portal: Portal) =>
+
+      try {
+        ScraperBaseClass.main(s"--class=${portal._class}", "--environment=mock")
+      } catch {
+        case e: Exception => log.error("Exception during scraping", e)
+      }
+
+      sender() ! Complete(portal)
   }
 
 }

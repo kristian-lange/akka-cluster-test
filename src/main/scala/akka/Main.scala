@@ -54,10 +54,10 @@ object Main {
   def startClusterInSameJvm(): Unit = {
     // two master nodes
     startMaster(2551)
-    startMaster(2552)
+//    startMaster(2552)
     // two worker nodes with two worker actors each
     startWorker(5001, 2)
-    startWorker(5002, 2)
+//    startWorker(5002, 2)
   }
 
   /**

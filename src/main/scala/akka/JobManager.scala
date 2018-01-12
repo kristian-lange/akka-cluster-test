@@ -35,6 +35,17 @@ class JobManager extends Actor with ActorLogging with Timers {
     "XingProfileScraper" -> "http://www.xing.de/",
     "FacebookProfileScraper" -> "http://www.facebook.com/")
 
+  val dummyPortals = Array(
+    "AllthepeopleProfile", "ArchiloversProfile", "RemoteProfile", "BebeeProfile", "BloombergProfile",
+    "BrilliantProfile", "DoctorshangoutProfile", "DrupalProfile", "ElloProfile", "HackerearthProfile",
+    "HealthgradesProfile", "HealthtapProfile", "JustiaProfile", "LaunchpadProfile", "LawyrsProfile",
+    "MartindaleProfile", "MediumProfile", "NpmjsProfile", "PortfoliumProfile", "PreziProfile",
+    "RallypointProfile", "SlideshareProfile", "SsrnProfile", "TorialProfile",
+    "TwitterProfile", "Typo3forgeProfile", "UpworkProfile", "VitalsProfile",
+    "VizualizemeProfile", "WizbiiProfile", "XingProfile", "ZillowProfile", "AboutMeProfile",
+    "AllnursesProfile", "AvvoProfile", "BarkProfile", "BintrayProfile", "CoderwallProfile"
+  )
+
   val random = new scala.util.Random
 
   def nextProfile(): Profile = {
@@ -44,9 +55,15 @@ class JobManager extends Actor with ActorLogging with Timers {
   }
 
   def generateBulkOrder() = {
-    val bulk = Queue.fill(bulkOrderSize) {
-      val profile = nextProfile()
-      JobOrder(profile._id, profile)
+    //    val bulk = Queue.fill(bulkOrderSize) {
+    //      val profile = nextProfile()
+    //      JobOrder(profile._id, profile)
+    //    }
+
+    val iterator = dummyPortals.iterator
+    val bulk = Queue.fill(dummyPortals.length) {
+      val portal = Portal(iterator.next())
+      JobOrder(nextId(), portal)
     }
     BulkOrder(nextId(), bulk)
   }
